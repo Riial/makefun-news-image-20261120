@@ -1,390 +1,594 @@
 #!/usr/bin/env python3
-"""Compose the front page for make.fun news-image-20261120.
+"""Build the v2 front page for news-image-20261120: Friday 20 November 2026.
 
-Builds assets/entry.png (1024x1024) from 13 original illustration panels
-plus typography drawn with PIL. All 43 stories were verified as Friday
-20 November 2026 events; near-miss 19 Nov stories are named in the
-DATE CHECK box, never as news.
+Renders one 1024x1024 newspaper-style image with PIL and writes it to
+assets/entry.png next to this file. The entry program (main.py) only copies
+that file to /output/entry.png. Every story below was date-checked against
+primary reporting for 20 November 2026 in this session; items that turned
+out to be Thursday 19 November news live in the DATE CHECK box, not in the
+day's stories.
 """
+
 import os
 from PIL import Image, ImageDraw, ImageFont
 
-BASE = os.path.dirname(os.path.abspath(__file__))
-PANELS = os.path.join(BASE, "panels")
-OUT = os.path.join(BASE, "assets", "entry.png")
-FONT_DIR = "/usr/share/fonts/truetype/dejavu"
-
 W, H = 1024, 1024
-CREAM = (246, 241, 227)
-NAVY = (14, 42, 71)
-INK = (26, 26, 26)
-RED = (163, 30, 34)
-GRAY = (91, 113, 134)
-LIGHT = (237, 230, 210)
-SEA = (217, 228, 235)
-LAND = (234, 223, 194)
-RULE = (201, 191, 166)
-WHITE = (255, 255, 255)
+HERE = os.path.dirname(os.path.abspath(__file__))
+OUT = os.path.join(HERE, "assets", "entry.png")
+
+# ---------------------------------------------------------------- palette
+PAPER = (247, 243, 234)
+INK = (17, 17, 17)
+GREY = (96, 92, 84)
+FAINT = (150, 145, 134)
+RED = (176, 30, 36)
+NAVY = (20, 33, 61)
+NAVY2 = (15, 32, 64)
+LAND = (58, 92, 143)
+TEAL = (13, 66, 66)
+TEAL_LT = (64, 150, 150)
+GREEN = (27, 68, 42)
+GREEN_LT = (120, 180, 120)
+GOLD = (255, 210, 63)
+CREAM = (250, 246, 238)
+RULE = (17, 17, 17)
+
+# ---------------------------------------------------------------- fonts
+FD = "/usr/share/fonts/truetype"
+SERIF_B = os.path.join(FD, "liberation", "LiberationSerif-Bold.ttf")
+SERIF = os.path.join(FD, "liberation", "LiberationSerif-Regular.ttf")
+SERIF_I = os.path.join(FD, "liberation", "LiberationSerif-Italic.ttf")
+SANS_B = os.path.join(FD, "dejavu", "DejaVuSans-Bold.ttf")
+SANS = os.path.join(FD, "dejavu", "DejaVuSans.ttf")
 
 
-def font(name, size):
-    return ImageFont.truetype(os.path.join(FONT_DIR, name), size)
+def F(path, size):
+    return ImageFont.truetype(path, size)
 
 
-SERIF_B = lambda s: font("DejaVuSerif-Bold.ttf", s)
-SERIF = lambda s: font("DejaVuSerif.ttf", s)
-SANS = lambda s: font("DejaVuSans.ttf", s)
-SANS_B = lambda s: font("DejaVuSans-Bold.ttf", s)
-
-
-def wrap(d, text, fnt, width):
-    """Greedy word wrap; returns list of lines that fit width."""
+# ---------------------------------------------------------------- helpers
+def wrap(text, font, max_w, draw):
+    """Greedy word wrap; returns a list of lines that fit max_w."""
     lines, cur = [], ""
-    for word in text.split(" "):
+    for word in text.split():
         trial = (cur + " " + word).strip()
-        if d.textlength(trial, font=fnt) <= width:
+        if draw.textlength(trial, font=font) <= max_w or not cur:
             cur = trial
         else:
-            if cur:
-                lines.append(cur)
+            lines.append(cur)
             cur = word
     if cur:
         lines.append(cur)
     return lines
 
 
-def fit_text(d, text, fnt, width, max_lines, shrink_to=None):
-    """Wrap text; shrink font until it fits max_lines. Returns (lines, font)."""
-    size = fnt.size
-    floor = shrink_to if shrink_to else max(8, size - 4)
-    while size >= floor:
-        f = font(fnt.path, size) if hasattr(fnt, "path") else fnt
-        lines = wrap(d, text, f, width)
-        if len(lines) <= max_lines:
-            return lines, f
-        size -= 1
-    f = font(fnt.path, floor) if hasattr(fnt, "path") else fnt
-    return wrap(d, text, f, width)[:max_lines], f
+def text_block(draw, x, y, lines, font, fill=INK, leading=None, align="left",
+               width=None):
+    """Draw lines starting at (x, y); returns y after the last line."""
+    if leading is None:
+        leading = font.size + 2
+    for line in lines:
+        if align == "center" and width is not None:
+            lx = x + (width - draw.textlength(line, font=font)) // 2
+        elif align == "right" and width is not None:
+            lx = x + width - draw.textlength(line, font=font)
+        else:
+            lx = x
+        draw.text((lx, y), line, font=font, fill=fill)
+        y += leading
+    return y
 
 
-def paste_panel(img, path, box):
-    """Center-crop panel to box aspect, resize, paste, 1px navy border."""
-    x0, y0, x1, y1 = box
-    tw, th = x1 - x0, y1 - y0
-    im = Image.open(path).convert("RGB")
-    iw, ih = im.size
-    target = tw / th
-    src = iw / ih
-    if src > target:  # too wide: crop sides
-        nw = int(ih * target)
-        left = (iw - nw) // 2
-        im = im.crop((left, 0, left + nw, ih))
-    else:  # too tall: crop top/bottom (keep upper 60% for skies)
-        nh = int(iw / target)
-        top = int((ih - nh) * 0.35)
-        im = im.crop((0, top, iw, top + nh))
-    im = im.resize((tw, th), Image.LANCZOS)
-    img.paste(im, (x0, y0))
-    d = ImageDraw.Draw(img)
-    d.rectangle([x0, y0, x1 - 1, y1 - 1], outline=NAVY, width=1)
+def hline(draw, x0, x1, y, fill=INK, width=1):
+    draw.line([(x0, y), (x1, y)], fill=fill, width=width)
 
 
-# ---------------------------------------------------------------- stories
-BIG3 = [
-    dict(pin=1, file="01-brussels.webp", kicker="1 · BRUSSELS — SUMMIT",
-         head="UK and EU strike youth-mobility deal at Brussels summit",
-         deck="Britain will issue 100,000 visas a year to young Europeans, and "
-              "Britons get the same in return, in the biggest reset of ties since "
-              "Brexit. Food checks go; carbon markets link."),
-    dict(pin=2, file="02-taipei.webp", kicker="2 · TAIPEI — MARKETS",
-         head="Taiwan shares plunge 2,200 points as AI-bubble fear sweeps Asia",
-         deck="Taipei's benchmark dives below 37,000 and has shed 7,000 points in "
-              "a week. SoftBank slides in Tokyo as the great AI trade unwinds."),
-    dict(pin=3, file="03-akvan.webp", kicker="3 · ODISHA — WEATHER",
-         head="Cyclone Akvan comes ashore in Odisha",
-         deck="The season's third cyclone crosses the coast near Gopalpur with "
-              "winds of 70–80 km/h. More than 300,000 people were moved to "
-              "shelters; no deaths were reported at first count."),
+def kicker(draw, x, y, label, color=RED, size=11):
+    f = F(SANS_B, size)
+    draw.text((x, y), label, font=f, fill=color)
+    return y + size + 3
+
+
+# ------------------------------------------------------- world land mask
+# 96 columns (lon -180..180) x 36 rows (lat 75..-55). '#' = land.
+# Stylised dotted-map mask, drawn from general geography.
+LANDMASK = [
+    ".................................#######..............................................",
+    "....#######...##############.......#########......###################################.",
+    "...##########..################...##########....#####################################",
+    "....########..#################....########..#.#########..############################",
+    ".....#######...###############......######......#########..###########################.",
+    "......######...###############....##...######...########################################",
+    "......######....#############....###...#######..#######################################",
+    ".......######....###########....##############..######################################.",
+    ".......######.....#########....###############..####################################...",
+    "........######.....########....##############...##################################.....",
+    "........######.....#######.....#############....###############################.#.......",
+    ".........######....#######.....############......##########################.............",
+    ".........######....######......###########.......#######################..............",
+    ".........######....#####.......##########........######################...............",
+    "..........#####....#####.......#########.........#####################................",
+    "..........#####....#####.......########..........###################..................",
+    "...........####....####........########..........##################...................",
+    "............###....###.........########...........#################..................",
+    "............###...####.........#########..........################...................",
+    "............###...####.........########...........###############....................",
+    "............###...#####.........#######...........##############.....................",
+    "............###...#####.........#######............############......................",
+    "............###...#####.........######.............###########....##..................",
+    "............###...####..........######.............##########.....###.................",
+    ".............###..####..........######.............#########.....######...............",
+    ".............###..###...........######.............########......#######..............",
+    ".............###..###...........######.............########..#...########.............",
+    ".............###..###...........#####..............#######..#....########.............",
+    "..............##..###...........#####..............######.......########..............",
+    "..............##..###...........####...............#####........#######...............",
+    "..............##..##............####...............####.........######................",
+    "..............##..##............###................###..........####...#..............",
+    "..............##..#.............###..............................##....#...............",
+    "...............#...............##.....................................#...............",
+    "...............#...............#......................................................",
+    "...............#........................................................................",
+]
+LANDMASK = [row.ljust(96, ".")[:96] for row in LANDMASK]
+assert len(LANDMASK) == 36 and all(len(r) == 96 for r in LANDMASK)
+
+
+def draw_map(draw, x0, y0, w, h):
+    """Dark-navy dotted world map inside (x0, y0, w, h)."""
+    draw.rectangle([x0, y0, x0 + w, y0 + h], fill=NAVY2)
+    cw, ch = w / 96.0, h / 36.0
+    for r, row in enumerate(LANDMASK):
+        for c, ch_ in enumerate(row):
+            if ch_ == "#":
+                cx = x0 + (c + 0.5) * cw
+                cy = y0 + (r + 0.5) * ch
+                draw.ellipse([cx - 1.6, cy - 1.6, cx + 1.6, cy + 1.6],
+                             fill=LAND)
+
+
+def pin(draw, x, y, n):
+    """Numbered gold pin; returns the (x, y) used."""
+    draw.ellipse([x - 8, y - 8, x + 8, y + 8], fill=GOLD, outline=INK, width=1)
+    f = F(SANS_B, 10)
+    t = str(n)
+    tw = draw.textlength(t, font=f)
+    draw.text((x - tw / 2, y - 7), t, font=f, fill=INK)
+    return x, y
+
+
+# ------------------------------------------------------- feature panels
+def panel_akvan(draw, x, y, w, h):
+    """Cyclone panel: dark teal, small spiral top-right, huge LANDFALL."""
+    draw.rectangle([x, y, x + w, y + h], fill=TEAL)
+    cx, cy = x + w * 0.80, y + 46
+    for k, r in enumerate([10, 21, 32, 43, 54]):
+        col = (90 + k * 22, 170 + k * 10, 170 + k * 10)
+        draw.arc([cx - r, cy - r, cx + r, cy + r],
+                 start=40 + k * 55, end=250 + k * 55, fill=col, width=4)
+    draw.ellipse([cx - 7, cy - 7, cx + 7, cy + 7], fill=(220, 240, 240))
+    for i in range(8):  # rain streaks, right half only
+        rx = x + w * 0.55 + i * 18
+        ry = y + 8 + (i % 3) * 22
+        draw.line([(rx, ry), (rx - 6, ry + 13)], fill=TEAL_LT, width=3)
+    f = F(SANS_B, 44)
+    draw.text((x + 14, y + h - 96), "LANDFALL", font=f, fill=(255, 255, 255))
+    f2 = F(SANS_B, 15)
+    draw.rectangle([x, y + h - 34, x + w, y + h], fill=GOLD)
+    draw.text((x + 14, y + h - 30), "300,000 EVACUATED", font=f2, fill=INK)
+
+
+def panel_kyiv(draw, x, y, w, h):
+    """Kyiv panel: dark navy, one-line keyword, bridge with a blast."""
+    import math
+    draw.rectangle([x, y, x + w, y + h], fill=NAVY)
+    f = F(SANS_B, 28)
+    draw.text((x + 14, y + 8), "THREE BRIDGES ", font=f,
+              fill=(255, 255, 255))
+    tw = draw.textlength("THREE BRIDGES ", font=f)
+    draw.text((x + 14 + tw, y + 8), "HIT", font=f, fill=GOLD)
+    # bridge: deck, arches, towers, river — all below the keyword
+    dy = y + h - 56
+    draw.line([(x + 10, dy), (x + w - 10, dy)], fill=(220, 225, 235), width=6)
+    for ax in (x + 52, x + 132, x + 212):
+        draw.arc([ax - 30, dy - 30, ax + 30, dy + 6], start=180, end=360,
+                 fill=(220, 225, 235), width=5)
+    for tx in (x + 30, x + 150, x + 250):
+        draw.line([(tx, dy - 34), (tx, dy)], fill=(220, 225, 235), width=5)
+    for i in range(6):
+        rx = x + 20 + i * 48
+        draw.line([(rx, y + h - 44), (rx + 26, y + h - 44)],
+                  fill=(90, 140, 200), width=3)
+    # blast on the bridge's right end
+    bx, by = x + w * 0.82, dy - 12
+    for r, col in [(26, (176, 60, 40)), (17, (230, 120, 40)),
+                   (9, (255, 210, 63))]:
+        draw.ellipse([bx - r, by - r, bx + r, by + r], fill=col)
+    for i in range(8):
+        a = math.radians(i * 45)
+        x1 = bx + 12 * math.cos(a)
+        y1 = by + 12 * math.sin(a)
+        x2 = bx + 30 * math.cos(a)
+        y2 = by + 30 * math.sin(a)
+        draw.line([(x1, y1), (x2, y2)], fill=(255, 210, 63), width=3)
+    f2 = F(SANS_B, 15)
+    draw.rectangle([x, y + h - 34, x + w, y + h], fill=(176, 30, 36))
+    draw.text((x + 14, y + h - 30), "3 KILLED  \u00b7  POWER AND WATER CUT",
+              font=f2, fill=(255, 255, 255))
+
+
+def panel_cop31(draw, x, y, w, h):
+    """COP31 panel: dark green, globe, huge NO DEAL YET keyword."""
+    draw.rectangle([x, y, x + w, y + h], fill=GREEN)
+    cx, cy = x + w * 0.74, y + h * 0.42
+    draw.ellipse([cx - 62, cy - 62, cx + 62, cy + 62], fill=(46, 120, 70))
+    draw.ellipse([cx - 62, cy - 62, cx + 62, cy + 62], outline=GREEN_LT,
+                 width=3)
+    for k, lat in enumerate([-30, 0, 30]):
+        ry = 62 * abs(lat) / 90.0
+        rx = 62
+        draw.arc([cx - rx, cy - ry - 14, cx + rx, cy + ry + 14],
+                 start=0, end=360, fill=GREEN_LT, width=2)
+    draw.ellipse([cx - 52, cy - 10, cx - 18, cy + 16], fill=GREEN_LT)
+    draw.ellipse([cx + 6, cy - 26, cx + 34, cy - 2], fill=GREEN_LT)
+    draw.ellipse([cx - 8, cy + 14, cx + 22, cy + 40], fill=GREEN_LT)
+    f = F(SANS_B, 38)
+    draw.text((x + 14, y + 8), "NO DEAL", font=f, fill=(255, 255, 255))
+    draw.text((x + 14, y + 50), "YET", font=f, fill=GOLD)
+    f2 = F(SANS_B, 15)
+    draw.rectangle([x, y + h - 34, x + w, y + h], fill=GOLD)
+    draw.text((x + 14, y + h - 30), "FINAL DAY  ·  TEXT DUE AT MIDNIGHT",
+              font=f2, fill=INK)
+
+
+# ---------------------------------------------------------------- content
+# All stories date-verified 20 November 2026 in this session. Thursday
+# 19 November items sit in DATE_CHECK, never in the day's stories.
+NUMBERS = [
+    ("300,000", "evacuated ahead of Akvan"),
+    ("\u22126.2%", "Taiwan's Taiex on Friday"),
+    ("$92.22", "Brent crude a barrel"),
+    ("2.2%", "Japan core inflation, October"),
+    ("100,000", "youth-mobility visas a year"),
+    ("60.7%", "tumours shrank in the trial"),
+]
+
+REGIONS = [
+    ("ASIA", "Taiex \u22126.2%"),
+    ("EUROPE", "Italy on strike"),
+    ("MIDDLE EAST", "Brent $92"),
+    ("AFRICA", "Senegal boat sinks"),
+    ("AMERICAS", "US sanctions"),
+    ("OCEANIA", "Phillips 118"),
+]
+
+FEATURES = [
+    ("CYCLONE AKVAN", panel_akvan,
+     "Cyclone Akvan slams India's east coast",
+     "Landfall near Gopalpur at dawn, winds 70\u201380 km/h; 300,000 moved "
+     "to shelters and no deaths reported \u2014 the third cyclone to "
+     "threaten Odisha in 24 days.",
+     "IMD \u00b7 REUTERS"),
+    ("WAR IN UKRAINE", panel_kyiv,
+     "Russian missiles hit three Kyiv bridges; three killed",
+     "Overnight barrage knocks out power, heat and water; a day after "
+     "strikes damaged Dutch and Austrian embassies, the EU summons "
+     "Russia's envoy.",
+     "REUTERS"),
+    ("CLIMATE SUMMIT", panel_cop31,
+     "COP31 reaches final day with fossil fuels erased from draft",
+     "Thursday's text cut to 80 paragraphs with every fossil-fuel "
+     "reference gone; \u201c35 by 35\u201d goal backed by about 75 nations; "
+     "final text due at midnight.",
+     "UN NEWS \u00b7 CNN"),
 ]
 
 GRID = [
-    dict(pin=4, file="04-kyiv.webp", head="Russian missiles hit three Kyiv bridges; three killed"),
-    dict(pin=5, file="05-berlin.webp", head="Kyiv: no deal without us, allies pledge more aid"),
-    dict(pin=6, file="06-gaza.webp", head="Israel's Gaza operation crosses the ceasefire line"),
-    dict(pin=7, file="07-istanbul.webp", head="Turkish court bars jailed Istanbul mayor from 2028 race"),
-    dict(pin=8, file="08-drones.webp", head="Britain pledges 1,000-plus drones for Ukraine"),
-    dict(pin=9, file="09-sanctions.webp", head="US sanctions Comancheros and 'Ndrangheta"),
-    dict(pin=10, file="10-b2.webp", head="B-2 pilots tell how Midnight Hammer unfolded"),
-    dict(pin=11, file="11-florida.webp", head="Florida carries out a record 20th execution"),
-    dict(pin=12, file="12-genoa.webp", head="Drones halt flights at Genoa airport"),
-    dict(pin=13, file="13-chip.webp", head="California opens probe into Nvidia's China chip sales"),
+    # (kicker, headline, deck, source, wide, table)
+    ("MARKETS", "AI sell-off sweeps Asia",
+     "Taiex faces its worst week since 1990, down 17%; SoftBank \u221214.5%.",
+     "REUTERS", True,
+     [("TAIEX", "\u22126.2%"), ("NIKKEI", "\u22125.1%"),
+      ("KOSPI", "\u22125.2%"), ("HANG SENG", "\u22121.9%")]),
+    ("BRUSSELS", "UK and EU agree youth-mobility deal",
+     "100,000 visas a year in a reset sealed at the summit; leaders also "
+     "discuss talks with Russia on ending the war.",
+     "BBC", False, None),
+    ("APEC", "Xi hails \u2018full turnaround\u2019 with Australia",
+     "In Shenzhen, Xi and Albanese pledge closer ties on farming, energy "
+     "and AI; Albanese flies on to Beijing.",
+     "REUTERS", False, None),
+    ("JUSTICE", "Rohingya hail \u2018a day of justice\u2019",
+     "A day after the world court found Myanmar guilty of genocide, "
+     "survivors in the camps celebrate; the US says it is studying the ruling.",
+     "REUTERS", False, None),
+    ("ROME", "Italy stops for a general strike",
+     "CGIL halts buses and metros in Rome and marches in 100 towns against "
+     "the budget; trains and flights are spared on Friday.",
+     "ANSA", False, None),
+    ("SCIENCE", "Cancer pill clears tumours in 1 in 12",
+     "Daraxonrasib with chemo shrank tumours in 60.7% of patients in an "
+     "early trial presented in Barcelona; 76.6% alive after a year.",
+     "EORTC", False, None),
+    ("CRICKET", "Phillips completes a century treble",
+     "118 in Wellington \u2014 the first batter to hit Test, ODI and T20I "
+     "hundreds against India in one year. NZ 368; India 159\u20131.",
+     "REUTERS", False, None),
+    ("ECONOMY", "Japan inflation hits a 2026 high",
+     "Core prices up 2.2% in October, above the Bank of Japan's target; "
+     "China holds loan rates for an 18th month.",
+     "REUTERS", False, None),
+    ("ENERGY", "Oil climbs as Hormuz tankers hit mines",
+     "Brent $92.22 after two tankers strike mines in the strait and Houthi "
+     "attacks on Riyadh; still set for a third weekly fall.",
+     "REUTERS", False, None),
 ]
-
-NUMBERS = [
-    ("100,000", "YOUTH VISAS A YEAR — UK–EU DEAL"),
-    ("2,200", "POINTS LOST BY TAIWAN STOCKS"),
-    ("3", "KYIV BRIDGES HIT BY MISSILES"),
-    ("1,000+", "DRONES PLEDGED FOR UKRAINE"),
-    ("880,000", "AI CHIPS CLEARED FOR CHINA"),
-    ("300,000", "EVACUATED BEFORE CYCLONE AKVAN"),
-]
-
-REGIONS = "ASIA 5 · EUROPE 10 · AMERICAS 17 · MIDDLE EAST 7 · AFRICA 2 · OCEANIA 1 · GLOBAL 1"
 
 BRIEFS = [
-    "UN chief race: ninth ballot due as deadlock drags on.",
-    "Iraqi troops move in as militia deadline expires.",
-    "Harris meets Macron in Paris for a courtesy call.",
-    "Boat capsizes off Senegal; four dead.",
-    "Fuel shortages spark violence in Malawi.",
-    "Meta waters down its 2030 climate targets.",
-    "Poland lines up a $50bn nuclear deal with US firms.",
-    "Czech leaders visit Israel to talk defence.",
-    "Chicago man denies Hindu temple shooting plot.",
-    "White House tells press to bag phones on China flight.",
-    "Magnitude 5.6 quake strikes near New Caledonia.",
-    "America's war with Iran has cost $48bn and counting.",
-    "Saudi Arabia warns of thunderstorms and flash floods.",
-    "Samsung names a new chief for its mobile division.",
-    "Broadcom patches a critical VMware vCenter flaw.",
-    "House panel: 880,000 advanced AI chips cleared for China.",
-    "Anthropic slips on day two as the AI sell-off deepens.",
-    "Quebecor bids C$31bn for Canadian carrier Telus.",
-    "Japan core inflation hits 2.2%, a high for the year.",
-    "Lula visits ailing Chief Raoni as land rights advance.",
-    "Six killed in a gas blast at a Tbilisi apartment block.",
-    "One dead, 15 hurt in a fire at a French tower block.",
-    "Israeli jets hit a Hezbollah missile site in Lebanon.",
-    "US court curbs agriculture chief's religious emails.",
-    "Google's Gemini can now drive a Mac.",
-    "Democrats: law firm did $11.8m of free work for Trump.",
-    "Saudi defences shoot down two Houthi drones.",
-    "Fiona the hippo dies at Cincinnati Zoo after eating a hat.",
-    "China warns climbers off Mount Fuji as family offers reward.",
-    "Merz: fresh Ukraine talks with Europe to be held soon.",
+    ("IRAQ", "troops enter the Kataib Hezbollah stronghold under a deal"),
+    ("F1", "Russell tops a rain-hit Las Vegas FP2 in 1:47.272 after FP1 is washed out"),
+    ("GENOA", "airport halts flights after unidentified drones are spotted"),
+    ("UKRAINE", "Britain pledges 1,000+ drones for Kyiv in a \u00a3260m package"),
+    ("SANCTIONS", "US targets the Comancheros gang and Italy's 'Ndrangheta"),
+    ("ANTHROPIC", "shares slip 4.7% after hours after Thursday's record debut"),
+    ("SENEGAL", "four bodies recovered after a migrant boat capsizes off Yenne; dozens missing"),
+    ("MALAWI", "fuel queues stretch overnight; petrol $3.24 a litre, Africa's dearest"),
+    ("ARGENTINA", "Senate backs a disability framework unanimously, 71\u20130"),
+    ("POLAND", "probes unknown objects in its skies; air-threat warning lifted"),
+    ("IRAN WAR", "has cost the US $48.3bn, the Pentagon says"),
+    ("RIYADH", "Saudi defences shoot down two Houthi drones"),
+    ("LEBANON", "Israeli strike hits a Hezbollah missile site in the east"),
+    ("TBILISI", "six killed in a gas blast at an apartment block"),
+    ("NEW CALEDONIA", "5.6-magnitude quake strikes off the islands"),
+    ("FRANCE", "one dead and 15 hurt in a fire at an 18-storey block"),
+    ("PARIS", "Harris meets Macron in a courtesy call"),
+    ("UNITED NATIONS", "ninth ballot due in the race to lead the UN"),
+    ("VMWARE", "Broadcom patches a critical flaw in vCenter"),
+    ("CINCINNATI", "Fiona the hippo dies after swallowing a hat"),
 ]
 
-DATE_CHECK = (
-    "DATE CHECK — NOT TODAY: Shenzhen summit & peace declaration · Anthropic's Nasdaq debut, "
-    "+17% · Pete Rose pardon · US–Venezuela military deal · COP31 draft drops fossil fuels · "
-    "Mongolia's president resigns · Bangladesh lockdown violence · Denmark ratifies Greenland "
-    "deal · 589m children in conflict zones · Kyiv embassy strikes · Houthi strikes on Riyadh, "
-    "tankers mined · Haiti raid kills 34 · Bukele registers for third term · Pew: Islam largest "
-    "faith by 2035 — all Thu 19 Nov (Venezuela deal Wed 18 Nov; Pew study Wed 18 Nov)."
-)
+DATE_CHECK = [
+    "Anthropic debuts on Nasdaq, +17% \u2014 $83 to $97.17 in a record $81.3bn IPO",
+    "Trump, Xi and Putin meet in Shenzhen; a peace declaration follows",
+    "Bukele files for a third term as El Salvador's president",
+    "World court: Myanmar guilty of Rohingya genocide, 9\u20136",
+    "US\u2013Venezuela deal signed",
+    "COP31 draft drops every fossil-fuel reference",
+    "Senate rejects an Iran war-powers bid, 51\u201348",
+    "Trump pardons Pete Rose posthumously",
+    "Strikes damage Dutch and Austrian embassies in Kyiv",
+    "Meta rethinks its 2030 net-zero goal as AI emissions jump 45%",
+]
 
-FOOTER = ("Sources: Reuters · The Times · BBC · AP · AFP · IMD · Bloomberg · Pew · Save the Children · "
-          "UN News · Le Monde — see NEWS.md. All 43 stories date-checked to Friday 20 November 2026.")
-
-# Map pins: (story number, lon, lat) — a few nudged so circles don't collide.
+# (map x, map y, key label) — pixel coords inside the map panel.
 PINS = [
-    (1, 4.5, 48.0), (2, 121.56, 25.03), (3, 84.9, 19.27), (4, 30.52, 50.45),
-    (5, 15.5, 53.5), (6, 39.0, 27.5), (7, 33.5, 37.5), (8, -3.0, 53.0),
-    (9, -77.04, 38.9), (10, -93.55, 38.73), (11, -84.28, 30.44),
-    (12, 11.0, 42.0), (13, -121.49, 38.58),
+    (360, 732, "Gopalpur \u2014 Cyclone Akvan landfall"),
+    (297, 699, "Kyiv \u2014 three bridges hit"),
+    (302, 716, "Antalya \u2014 COP31 final day"),
+    (422, 726, "Taipei \u2014 Taiex \u22126.2%"),
+    (438, 714, "Tokyo \u2014 Nikkei \u22125.1%"),
+    (412, 712, "Seoul \u2014 Kospi \u22125.2%"),
+    (252, 694, "Brussels \u2014 UK\u2013EU youth deal"),
+    (398, 729, "Shenzhen \u2014 Xi meets Albanese"),
+    (286, 710, "Rome \u2014 general strike"),
+    (258, 714, "Barcelona \u2014 cancer pill trial"),
+    (477, 797, "Wellington \u2014 Phillips 118"),
+    (330, 724, "Strait of Hormuz \u2014 tankers hit mines"),
+    (378, 730, "Cox's Bazar \u2014 Rohingya hail ruling"),
 ]
 
-PIN_KEY = [
-    "Brussels — UK–EU summit", "Taipei — stocks plunge", "Odisha — Cyclone Akvan",
-    "Kyiv — bridges hit", "Berlin — allies pledge aid", "Gaza — ceasefire-line op",
-    "Istanbul — mayor barred", "London — drones for Ukraine", "Washington — US sanctions",
-    "Missouri — B-2 pilots", "Florida — 20th execution", "Genoa — airport drones",
-    "California — Nvidia probe",
-]
 
-# Simplified continent outlines (lon, lat).
-NORTH_AMERICA = [(-168, 66), (-156, 58), (-148, 61), (-140, 60), (-134, 57), (-128, 51),
-    (-124, 48), (-124, 42), (-121, 37), (-117, 33), (-112, 29), (-108, 25), (-105, 21),
-    (-100, 18), (-96, 16), (-93, 15), (-89, 14), (-85, 12), (-82, 9), (-79, 9), (-77, 8),
-    (-79, 10), (-82, 13), (-86, 16), (-88, 17), (-90, 21), (-92, 19), (-95, 19), (-97, 26),
-    (-94, 29), (-90, 29), (-85, 30), (-81, 26), (-80, 31), (-77, 34), (-75, 38), (-74, 41),
-    (-70, 43), (-67, 45), (-63, 44), (-59, 47), (-54, 48), (-53, 50), (-56, 52), (-60, 55),
-    (-64, 58), (-68, 60), (-73, 62), (-79, 63), (-85, 66), (-92, 66), (-96, 69), (-108, 68),
-    (-120, 69), (-133, 70), (-145, 70), (-157, 71), (-165, 68)]
-SOUTH_AMERICA = [(-77, 7), (-75, 10), (-72, 12), (-68, 11), (-64, 10), (-60, 8), (-55, 6),
-    (-52, 5), (-50, 0), (-48, -3), (-44, -3), (-41, -6), (-38, -8), (-35, -9), (-37, -13),
-    (-39, -17), (-40, -22), (-46, -24), (-49, -28), (-52, -33), (-55, -35), (-58, -38),
-    (-62, -41), (-66, -45), (-68, -50), (-69, -52), (-71, -54), (-73, -50), (-73, -44),
-    (-73, -38), (-72, -32), (-71, -25), (-70, -19), (-75, -15), (-79, -9), (-81, -5),
-    (-80, 0), (-80, 3), (-77, 5)]
-AFRICA = [(-17, 15), (-16, 20), (-15, 24), (-13, 27), (-10, 29), (-6, 33), (-2, 35), (3, 37),
-    (10, 37), (11, 34), (15, 32), (19, 30), (25, 32), (30, 31), (32, 31), (34, 28), (35, 24),
-    (37, 20), (39, 18), (40, 15), (43, 12), (46, 11), (51, 12), (51, 10), (48, 6), (44, 2),
-    (41, -2), (40, -6), (39, -10), (37, -14), (35, -18), (33, -22), (32, -26), (29, -29),
-    (26, -33), (20, -35), (17, -32), (15, -28), (13, -22), (12, -17), (13, -12), (12, -6),
-    (9, -1), (9, 4), (4, 6), (-2, 5), (-8, 5), (-13, 8), (-16, 12)]
-EURASIA = [(-10, 36), (-9, 38), (-9, 43), (-2, 44), (-1, 46), (-4, 48), (-2, 49), (0, 50),
-    (3, 53), (7, 54), (8, 57), (10, 59), (6, 62), (12, 64), (18, 66), (21, 70), (25, 71),
-    (30, 70), (35, 68), (40, 68), (45, 68), (52, 69), (58, 69), (66, 69), (73, 72), (80, 73),
-    (90, 75), (100, 76), (110, 74), (120, 73), (130, 72), (140, 72), (150, 70), (158, 69),
-    (162, 66), (170, 66), (178, 65), (178, 62), (170, 60), (162, 58), (158, 53), (156, 51),
-    (150, 59), (142, 55), (140, 48), (138, 42), (135, 38), (130, 35), (127, 35), (122, 32),
-    (120, 28), (118, 25), (112, 22), (108, 18), (105, 10), (103, 7), (100, 6), (98, 10),
-    (96, 16), (94, 17), (92, 21), (89, 22), (86, 20), (84, 19), (80, 16), (77, 8), (76, 10),
-    (73, 16), (70, 20), (67, 24), (64, 25), (60, 25), (57, 26), (54, 26), (52, 28), (50, 29),
-    (48, 30), (48, 24), (44, 18), (42, 15), (40, 13), (38, 20), (35, 28), (34, 31), (33, 36),
-    (30, 36), (27, 37), (23, 36), (22, 38), (19, 40), (16, 38), (14, 42), (12, 44), (8, 44),
-    (6, 43), (3, 42), (0, 40), (-2, 37), (-6, 36), (-9, 37)]
-AUSTRALIA = [(113, -22), (114, -28), (115, -33), (118, -35), (124, -33), (129, -32), (132, -32),
-    (135, -35), (138, -35), (140, -38), (144, -38), (147, -39), (150, -37), (153, -32),
-    (153, -27), (151, -24), (148, -20), (146, -19), (142, -15), (142, -11), (140, -17),
-    (136, -15), (135, -12), (132, -11), (130, -13), (126, -14), (122, -17), (118, -20)]
-ISLANDS = [  # (lon, lat, rx, ry) in degrees
-    (-2, 54, 3, 4), (139, 37, 2, 5), (172, -41, 2, 4), (115, -3, 6, 2),
-    (47, -19, 2, 5), (-42, 72, 8, 6), (-18, 65, 3, 2), (80, 7, 1.5, 2),
-    (121, 23.5, 1.5, 2.5),
-]
+# ---------------------------------------------------------------- layout
+def masthead(draw):
+    f_title = F(SERIF_B, 54)
+    draw.text((24, 12), "THE WORLD TODAY", font=f_title, fill=INK)
+    f_date = F(SANS_B, 16)
+    f_sub = F(SANS, 11)
+    rx = 1024 - 24
+    draw.text((rx - draw.textlength("FRIDAY 20 NOVEMBER 2026", font=f_date),
+               16), "FRIDAY 20 NOVEMBER 2026", font=f_date, fill=RED)
+    draw.text((rx - draw.textlength("THE DAY IN ONE PAGE", font=f_sub), 38),
+              "THE DAY IN ONE PAGE", font=f_sub, fill=GREY)
+    draw.text((rx - draw.textlength("Reuters \u00b7 BBC \u00b7 AP \u00b7 UN News",
+                                    font=f_sub), 54),
+              "Reuters \u00b7 BBC \u00b7 AP \u00b7 UN News", font=f_sub,
+              fill=GREY)
+    hline(draw, 24, 1000, 76, width=3)
+    hline(draw, 24, 1000, 80, width=1)
+
+
+def numbers_strip(draw):
+    y0, y1 = 86, 128
+    cw = 976 / 6
+    f_num = F(SANS_B, 25)
+    f_lab = F(SANS, 10)
+    for i, (num, lab) in enumerate(NUMBERS):
+        x = 24 + i * cw
+        if i:
+            draw.line([(x - 5, y0 + 4), (x - 5, y1 - 4)], fill=FAINT, width=1)
+        draw.text((x, y0), num, font=f_num, fill=RED)
+        for j, ln in enumerate(wrap(lab, f_lab, cw - 12, draw)):
+            draw.text((x, y0 + 27 + j * 12), ln, font=f_lab, fill=GREY)
+    hline(draw, 24, 1000, 136, width=1)
+
+
+def region_strip(draw):
+    y = 142
+    cw = 976 / 6
+    f = F(SANS, 11)
+    fb = F(SANS_B, 11)
+    for i, (reg, txt) in enumerate(REGIONS):
+        x = 24 + i * cw
+        draw.text((x, y), reg, font=fb, fill=INK)
+        tx = x + draw.textlength(reg + "  ", font=fb)
+        draw.text((tx, y), txt, font=f, fill=GREY)
+    hline(draw, 24, 1000, 162, width=1)
+
+
+def features(draw):
+    y0 = 170
+    colw = 317
+    xs = [24, 353, 682]
+    panel_h = 140
+    for (kick, panel_fn, head, deck, src), x in zip(FEATURES, xs):
+        panel_fn(draw, x, y0, colw, panel_h)
+        yy = y0 + panel_h + 8
+        yy = kicker(draw, x, yy, kick, size=11)
+        f_head = F(SERIF_B, 22)
+        lines = wrap(head, f_head, colw, draw)[:2]
+        yy = text_block(draw, x, yy, lines, f_head, leading=24)
+        f_deck = F(SERIF, 12)
+        lines = wrap(deck, f_deck, colw, draw)[:3]
+        yy = text_block(draw, x, yy + 2, lines, f_deck, leading=14)
+        f_src = F(SANS, 9)
+        draw.text((x, y0 + 256), "SOURCE: " + src, font=f_src, fill=GREY)
+    hline(draw, 24, 1000, 434, width=1)
+
+
+def grid(draw):
+    y0 = 442
+    colw = 187
+    gap = 10
+    xs = [24 + i * (colw + gap) for i in range(5)]
+    row_h = 96
+    f_kick = F(SANS_B, 10)
+    f_head = F(SERIF_B, 15)
+    f_deck = F(SERIF, 11)
+    f_src = F(SANS, 8)
+
+    def cell(x, y, w, kick, head, deck, src, table=None):
+        draw.text((x, y), kick, font=f_kick, fill=RED)
+        yy = y + 14
+        lines = wrap(head, f_head, w, draw)[:2]
+        yy = text_block(draw, x, yy, lines, f_head, leading=17)
+        if table:
+            f_tab = F(SANS_B, 11)
+            f_tv = F(SANS_B, 11)
+            ty = yy + 2
+            for j, (name, val) in enumerate(table):
+                tx = x + j * (w // 4)
+                draw.text((tx, ty), name, font=F(SANS, 9), fill=GREY)
+                draw.text((tx, ty + 11), val, font=f_tv, fill=RED)
+            yy = ty + 26
+            max_deck = 1
+        else:
+            max_deck = 3
+        lines = wrap(deck, f_deck, w, draw)[:max_deck]
+        yy = text_block(draw, x, yy + 1, lines, f_deck, leading=13)
+        draw.text((x, y + row_h - 10), "SOURCE: " + src, font=f_src,
+                  fill=GREY)
+
+    # row 1: markets wide (cols 1-2) + 3 singles
+    wide_w = colw * 2 + gap
+    cell(xs[0], y0, wide_w, *GRID[0][:4], table=GRID[0][5])
+    cell(xs[2], y0, colw, *GRID[1][:4])
+    cell(xs[3], y0, colw, *GRID[2][:4])
+    cell(xs[4], y0, colw, *GRID[3][:4])
+    # row 2: 5 singles
+    y1 = y0 + row_h + 8
+    for i, g in enumerate(GRID[4:]):
+        cell(xs[i], y1, colw, *g[:4])
+    hline(draw, 24, 1000, y1 + row_h + 6, width=1)
+
+
+def map_and_key(draw):
+    y0 = 654
+    draw.rectangle([24, y0, 494, 820], outline=INK, width=1)
+    draw.rectangle([506, y0, 1000, 820], outline=INK, width=1)
+    f_title = F(SANS_B, 12)
+    draw.text((34, y0 + 6), "WHERE IT HAPPENED", font=f_title, fill=INK)
+    draw.text((520, y0 + 6), "PIN KEY", font=f_title, fill=INK)
+    draw_map(draw, 34, 672, 450, 140)
+    for i, (px, py, _label) in enumerate(PINS, start=1):
+        pin(draw, px, py, i)
+    f_key = F(SANS, 10)
+    f_num = F(SANS_B, 10)
+    col_x = [520, 762]
+    for i, (_px, _py, label) in enumerate(PINS, start=1):
+        col = 0 if i <= 7 else 1
+        row = (i - 1) if i <= 7 else (i - 8)
+        x = col_x[col]
+        y = 672 + row * 21
+        draw.rectangle([x, y + 1, x + 15, y + 14], fill=GOLD, outline=INK,
+                       width=1)
+        t = str(i)
+        draw.text((x + 8 - draw.textlength(t, font=f_num) / 2, y + 2), t,
+                  font=f_num, fill=INK)
+        draw.text((x + 21, y + 2), label, font=f_key, fill=INK)
+
+
+def briefs(draw):
+    y0 = 826
+    f_title = F(SANS_B, 11)
+    draw.text((24, y0), "THE REST OF THE DAY", font=f_title, fill=INK)
+    hline(draw, 24, 1000, y0 + 15, width=1)
+    f_lead = F(SANS_B, 10)
+    f_rest = F(SANS, 10)
+    cols = [(24, 470), (514, 470)]
+    for ci, (cx, cw) in enumerate(cols):
+        items = BRIEFS[ci * 10:(ci + 1) * 10]
+        y = y0 + 21
+        for lead, rest in items:
+            draw.text((cx, y), lead, font=f_lead, fill=RED)
+            lx = cx + draw.textlength(lead + "  ", font=f_lead)
+            line = rest
+            # single line, clipped to the column width
+            while (draw.textlength(line, font=f_rest) > cw - (lx - cx)
+                   and len(line) > 10):
+                line = line.rsplit(" ", 1)[0] + "\u2026"
+            draw.text((lx, y), line, font=f_rest, fill=INK)
+            y += 10.0
+    return y0 + 21 + 10 * 10.0
+
+
+def date_check(draw):
+    y0 = 950
+    draw.rectangle([24, y0, 1000, 1018], outline=RED, width=1)
+    draw.rectangle([24, y0, 1000, y0 + 17], fill=RED)
+    f_title = F(SANS_B, 11)
+    draw.text((32, y0 + 3),
+              "DATE CHECK \u2014 THESE HAPPENED ON THURSDAY 19 NOVEMBER, NOT TODAY",
+              font=f_title, fill=(255, 255, 255))
+    f_item = F(SANS, 9)
+    for i, item in enumerate(DATE_CHECK):
+        col = 0 if i < 5 else 1
+        row = i if i < 5 else i - 5
+        x = 32 + col * 490
+        y = y0 + 21 + row * 9.5
+        draw.text((x, y), "\u2022  " + item, font=f_item, fill=INK)
+
+
+def build():
+    img = Image.new("RGB", (W, H), PAPER)
+    draw = ImageDraw.Draw(img)
+    masthead(draw)
+    numbers_strip(draw)
+    region_strip(draw)
+    features(draw)
+    grid(draw)
+    map_and_key(draw)
+    briefs(draw)
+    date_check(draw)
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    img.save(OUT, "PNG", optimize=True)
+    return OUT
 
 
 def main():
-    img = Image.new("RGB", (W, H), CREAM)
-    d = ImageDraw.Draw(img)
-    MX = 16
-    CW = 992  # content width
-
-    # ---------------------------------------------------------- masthead
-    f_top = SANS_B(9)
-    d.text((MX, 10), "ONE IMAGE · THE WHOLE DAY", font=f_top, fill=NAVY)
-    right = "FRIDAY 20 NOVEMBER 2026"
-    d.text((W - MX - d.textlength(right, font=f_top), 10), right, font=f_top, fill=NAVY)
-    d.line([(MX, 26), (W - MX, 26)], fill=NAVY, width=1)
-    f_title = SERIF_B(56)
-    title = "THE WORLD TODAY"
-    d.text(((W - d.textlength(title, font=f_title)) / 2, 30), title, font=f_title, fill=NAVY)
-    f_date = SERIF_B(15)
-    date = "FRIDAY, 20 NOVEMBER 2026  ·  43 STORIES  ·  ALL DATE-CHECKED"
-    d.text(((W - d.textlength(date, font=f_date)) / 2, 82), date, font=f_date, fill=INK)
-    d.line([(MX, 100), (W - MX, 100)], fill=NAVY, width=2)
-    d.line([(MX, 103), (W - MX, 103)], fill=NAVY, width=1)
-
-    # ---------------------------------------------------------- big three
-    col_x = [16, 350, 684]
-    col_w = 322
-    for i, s in enumerate(BIG3):
-        x = col_x[i]
-        d.text((x, 110), s["kicker"], font=SANS_B(10), fill=RED)
-        paste_panel(img, os.path.join(PANELS, s["file"]), (x, 126, x + col_w, 246))
-        lines, f = fit_text(d, s["head"], SERIF_B(16), col_w, 3, shrink_to=14)
-        y = 252
-        for ln in lines:
-            d.text((x, y), ln, font=f, fill=INK)
-            y += 19
-        lines, f = fit_text(d, s["deck"], SANS(10), col_w, 3, shrink_to=9)
-        y = 304
-        for ln in lines:
-            d.text((x, y), ln, font=f, fill=(58, 58, 58))
-            y += 13
-    d.line([(MX, 350), (W - MX, 350)], fill=RULE, width=1)
-
-    # ---------------------------------------------------------- numbers strip
-    d.rectangle([MX, 356, W - MX, 406], fill=NAVY)
-    cell_w = CW / 6
-    for i, (num, label) in enumerate(NUMBERS):
-        cx = MX + cell_w * i + cell_w / 2
-        f_num = SERIF_B(23)
-        d.text((cx - d.textlength(num, font=f_num) / 2, 363), num, font=f_num, fill=CREAM)
-        f_lab = SANS(8)
-        d.text((cx - d.textlength(label, font=f_lab) / 2, 392), label, font=f_lab, fill=(214, 222, 232))
-        if i:
-            d.line([(MX + cell_w * i, 364), (MX + cell_w * i, 398)], fill=(60, 84, 110), width=1)
-
-    # ---------------------------------------------------------- region strip
-    d.rectangle([MX, 412, W - MX, 438], fill=LIGHT)
-    f_reg = SANS_B(10)
-    reg = "WHERE THE NEWS CAME FROM   " + REGIONS
-    d.text(((W - d.textlength(reg, font=f_reg)) / 2, 421), reg, font=f_reg, fill=NAVY)
-
-    # ---------------------------------------------------------- grid of ten
-    d.text((MX, 444), "TEN MORE STORIES", font=SANS_B(11), fill=NAVY)
-    d.line([(MX + 150, 450), (W - MX, 450)], fill=RULE, width=1)
-    gw, gut = 192, 8
-    for i, s in enumerate(GRID):
-        row, col = divmod(i, 5)
-        x = MX + col * (gw + gut)
-        y = 462 + row * 100
-        paste_panel(img, os.path.join(PANELS, s["file"]), (x, y, x + gw, y + 70))
-        lines, f = fit_text(d, s["head"], SERIF_B(11), gw, 2, shrink_to=10)
-        yy = y + 74
-        for ln in lines:
-            d.text((x, yy), ln, font=f, fill=INK)
-            yy += 13
-
-    # ---------------------------------------------------------- world map
-    d.text((MX, 668), "WHERE IT HAPPENED", font=SANS_B(11), fill=NAVY)
-    d.text((MX + 158, 669), "— the 13 illustrated stories, numbered as they appear above",
-           font=SANS(9), fill=GRAY)
-    d.line([(MX, 684), (W - MX, 684)], fill=RULE, width=1)
-    map_x0, map_y0, map_x1, map_y1 = MX, 688, 656, 830
-    d.rectangle([map_x0, map_y0, map_x1, map_y1], fill=SEA, outline=NAVY, width=1)
-
-    def proj(lon, lat):
-        x = map_x0 + (lon + 170) / 360 * (map_x1 - map_x0)
-        y = map_y0 + (80 - lat) / 125 * (map_y1 - map_y0)
-        return x, y
-
-    for poly in (NORTH_AMERICA, SOUTH_AMERICA, AFRICA, EURASIA, AUSTRALIA):
-        d.polygon([proj(lon, lat) for lon, lat in poly], fill=LAND, outline=NAVY)
-    for lon, lat, rx, ry in ISLANDS:
-        cx, cy = proj(lon, lat)
-        sx = rx / 360 * (map_x1 - map_x0)
-        sy = ry / 125 * (map_y1 - map_y0)
-        d.ellipse([cx - sx, cy - sy, cx + sx, cy + sy], fill=LAND, outline=NAVY)
-    f_pin = SANS_B(7)
-    for num, lon, lat in PINS:
-        cx, cy = proj(lon, lat)
-        r = 6
-        d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=RED, outline=WHITE, width=1)
-        t = str(num)
-        d.text((cx - d.textlength(t, font=f_pin) / 2, cy - 5), t, font=f_pin, fill=WHITE)
-
-    # pin key: number + place for each illustrated story
-    kx = 672
-    d.text((kx, 688), "PIN KEY", font=SANS_B(10), fill=NAVY)
-    d.line([(kx, 702), (W - MX, 702)], fill=RULE, width=1)
-    f_key = SANS(9)
-    f_keyn = SANS_B(9)
-    for i, label in enumerate(PIN_KEY):
-        y = 706 + i * 9.5
-        d.text((kx, y), f"{i + 1}", font=f_keyn, fill=RED)
-        d.text((kx + 20, y), label, font=f_key, fill=INK)
-
-    # ---------------------------------------------------------- briefs
-    d.text((MX, 836), "THE DAY IN BRIEF", font=SANS_B(11), fill=NAVY)
-    d.line([(MX + 138, 842), (W - MX, 842)], fill=RULE, width=1)
-    f_brief = SANS(9)
-    for i, b in enumerate(BRIEFS):
-        col, row = divmod(i, 10)
-        x = MX + col * (col_w + 12)
-        y = 852 + row * 10.5
-        d.text((x, y), f"{i + 1}. {b}", font=f_brief, fill=INK)
-
-    # ---------------------------------------------------------- date check
-    d.rectangle([MX, 962, W - MX, 1004], fill=LIGHT, outline=NAVY, width=1)
-    lines = wrap(d, DATE_CHECK, SANS(8), CW - 20)
-    y = 966
-    for ln in lines:
-        d.text((MX + 10, y), ln, font=SANS(8), fill=INK)
-        y += 10
-    print(f"date-check lines: {len(lines)} (box fits 4)")
-
-    # ---------------------------------------------------------- footer
-    f_foot = SANS(8)
-    d.text(((W - d.textlength(FOOTER, font=f_foot)) / 2, 1008), FOOTER, font=f_foot, fill=GRAY)
-
-    # ---------------------------------------------------------- save
-    os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    img.save(OUT, optimize=True)
-    size = os.path.getsize(OUT)
-    print(f"saved {OUT}: {img.size}, {size} bytes")
-    if size > 1_048_576:
-        print("over 1 MiB — quantizing to 256-color palette")
-        q = img.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.FLOYDSTEINBERG)
-        q.save(OUT, optimize=True)
-        size = os.path.getsize(OUT)
-        print(f"quantized: {size} bytes")
-    assert img.size == (1024, 1024), img.size
-    assert size <= 1_048_576, size
-    print("OK")
+    path = build()
+    size = os.path.getsize(path)
+    im = Image.open(path)
+    print("wrote", path)
+    print("size_bytes", size, "limit", 1048576, "ok", size <= 1048576)
+    print("dimensions", im.size)
+    print("features", len(FEATURES))
+    print("grid_stories", len(GRID))
+    print("numbers", len(NUMBERS))
+    print("regions", len(REGIONS))
+    print("briefs", len(BRIEFS))
+    print("date_check_items", len(DATE_CHECK))
+    print("pins", len(PINS))
+    print("stories_total", len(FEATURES) + len(GRID) + len(BRIEFS))
 
 
 if __name__ == "__main__":
